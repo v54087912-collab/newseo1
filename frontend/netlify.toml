@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Proxy /api requests to the backend (Local development or if backend is deployed elsewhere)
+# Note: For production, REPLACE http://localhost:5000 with your actual backend URL.
+[[redirects]]
+  from = "/api/*"
+  to = "http://localhost:5000/:splat"
+  status = 200
+  force = true
