@@ -3,113 +3,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GlassyTasks - Portfolio To-Do & Notes</title>
-    <!-- Google Fonts: Poppins -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- FontAwesome CDN -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Custom CSS -->
+    <title>GlassyTasks | To-Do & Notes</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
 
-    <div class="background-animation"></div>
+    <div class="background-mesh"></div>
 
     <div class="glass-container">
+
+        <!-- Header & Tabs -->
         <header>
-            <h1>My <span class="highlight">Space</span></h1>
-            <div class="theme-toggle" style="display:none;"> <!-- Future feature: Dark/Light mode -->
-                <i class="fas fa-moon"></i>
+            <h1>My Dashboard</h1>
+            <div class="tab-switcher">
+                <button id="tabTasks" class="tab-btn active" onclick="switchTab('tasks')">Tasks</button>
+                <button id="tabNotes" class="tab-btn" onclick="switchTab('notes')">Notes</button>
             </div>
         </header>
 
-        <!-- Tabs -->
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="todo">
-                <i class="fas fa-check-circle"></i> Tasks
-            </button>
-            <button class="tab-btn" data-tab="notes">
-                <i class="fas fa-sticky-note"></i> Notes
-            </button>
-        </div>
-
-        <!-- To-Do Section -->
-        <section id="todo-section" class="tab-content active">
+        <!-- Tasks Section -->
+        <section id="tasksSection" class="active-section">
             <div class="input-group">
-                <input type="text" id="todo-input" placeholder="What needs to be done?" autocomplete="off">
-                <select id="priority-select" aria-label="Select Priority">
+                <input type="text" id="taskInput" placeholder="What needs to be done?">
+                <select id="priorityInput">
                     <option value="low">Low</option>
                     <option value="medium" selected>Medium</option>
                     <option value="high">High</option>
                 </select>
-                <button id="add-todo-btn" class="action-btn primary"><i class="fas fa-plus"></i></button>
+                <button id="addTaskBtn" class="action-btn"><i class="fas fa-plus"></i></button>
             </div>
 
-            <div class="filters">
+            <div class="filter-group">
                 <button class="filter-btn active" data-filter="all">All</button>
                 <button class="filter-btn" data-filter="active">Active</button>
                 <button class="filter-btn" data-filter="completed">Completed</button>
             </div>
 
-            <ul id="todo-list" class="task-list">
-                <!-- Tasks will be injected here -->
+            <ul id="taskList" class="task-list">
+                <!-- Tasks injected here -->
             </ul>
-
-            <div id="empty-state-todo" class="empty-state hidden">
-                <i class="fas fa-clipboard-check"></i>
-                <p>All caught up! No tasks here.</p>
-            </div>
         </section>
 
         <!-- Notes Section -->
-        <section id="notes-section" class="tab-content">
+        <section id="notesSection" class="hidden-section">
             <div class="notes-header">
-                <h2>My Notes</h2>
-                <button id="add-note-btn" class="action-btn primary"><i class="fas fa-plus"></i> New Note</button>
+                <button id="addNoteBtn" class="create-note-btn"><i class="fas fa-plus"></i> New Note</button>
             </div>
-
-            <div id="notes-grid" class="notes-grid">
-                <!-- Notes will be injected here -->
-            </div>
-
-             <div id="empty-state-notes" class="empty-state hidden">
-                <i class="fas fa-pen-fancy"></i>
-                <p>Start writing your thoughts...</p>
+            <div id="notesGrid" class="notes-grid">
+                <!-- Notes injected here -->
             </div>
         </section>
+
     </div>
 
     <!-- Note Modal -->
-    <div id="note-modal" class="modal hidden">
-        <div class="modal-content glass-effect">
+    <div id="noteModal" class="modal">
+        <div class="modal-content glass-modal">
             <span class="close-modal">&times;</span>
-            <h2 id="modal-title">Create Note</h2>
-            <input type="text" id="note-title-input" placeholder="Note Title" autocomplete="off">
-            <textarea id="note-body-input" placeholder="Write something..." rows="8"></textarea>
-            <div class="modal-actions">
-                <button id="cancel-note-btn" class="action-btn secondary">Cancel</button>
-                <button id="save-note-btn" class="action-btn primary">Save Note</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Edit Task Modal -->
-    <div id="edit-task-modal" class="modal hidden">
-        <div class="modal-content glass-effect">
-            <span class="close-modal-task">&times;</span>
-            <h2>Edit Task</h2>
-            <input type="text" id="edit-task-input" autocomplete="off">
-            <select id="edit-priority-select">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-            </select>
-            <div class="modal-actions">
-                 <button id="cancel-edit-task-btn" class="action-btn secondary">Cancel</button>
-                 <button id="save-edit-task-btn" class="action-btn primary">Save Changes</button>
-            </div>
+            <h2>New Note</h2>
+            <input type="text" id="noteTitle" placeholder="Title">
+            <textarea id="noteBody" placeholder="Write something..."></textarea>
+            <button id="saveNoteBtn" class="save-btn">Save Note</button>
         </div>
     </div>
 
