@@ -1,0 +1,20 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[context.production.environment]
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--legacy-peer-deps"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Optional: Redirects if you were using local API proxies, 
+# but your code currently hits external APIs directly.
+# Keeping this for safety if you add local API routes later.
+[[redirects]]
+  from = "/api/*"
+  to = "http://localhost:5000/:splat"
+  status = 200
+  force = true
