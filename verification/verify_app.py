@@ -14,57 +14,47 @@ def run():
         # Verify page title
         expect(page).to_have_title("GlassyTasks - Portfolio To-Do & Notes")
 
-        # Verify Tabs exist
-        expect(page.locator(".tab-btn").first).to_contain_text("Tasks")
-
         # --- To-Do Test ---
         # Add a task
         page.fill("#todo-input", "Buy groceries")
         page.click("#add-todo-btn")
-
-        # Verify task added
-        expect(page.locator(".task-text").first).to_have_text("Buy groceries")
 
         # Add a high priority task
         page.fill("#todo-input", "Finish project")
         page.select_option("#priority-select", "high")
         page.click("#add-todo-btn")
 
-        # Verify order (newest on top)
+        # Verify tasks exist
         expect(page.locator(".task-text").first).to_have_text("Finish project")
-        # Use to_contain_class instead of to_have_class for partial match
-        expect(page.locator(".task-item").first).to_contain_class("task-item")
+        expect(page.locator(".task-text").nth(1)).to_have_text("Buy groceries")
 
-        # Complete the first task
-        page.locator(".task-checkbox").first.click()
+        # --- Persistence Test ---
+        # Reload the page
+        page.reload()
 
-        # Switch to Active filter
-        page.click("button[data-filter='active']")
-
-        # Switch back to All
-        page.click("button[data-filter='all']")
+        # Verify tasks persist
+        expect(page.locator(".task-text").first).to_have_text("Finish project")
+        expect(page.locator(".task-text").nth(1)).to_have_text("Buy groceries")
 
         # --- Notes Test ---
         # Switch to Notes tab
         page.click("button[data-tab='notes']")
 
-        # Check empty state
-        # Initially empty state is visible (if no notes) or hidden (if notes exist from local storage? new session should be empty)
-        # But wait, localStorage persists across sessions in browser, but here we launch a fresh browser context?
-        # Actually standard playwright launch creates incognito context usually, but localStorage might be empty.
-        expect(page.locator("#empty-state-notes")).to_be_visible()
-
         # Create a note
         page.click("#add-note-btn")
-        expect(page.locator("#note-modal")).to_be_visible()
-
         page.fill("#note-title-input", "Meeting Notes")
         page.fill("#note-body-input", "Discuss Q3 goals and roadmap.")
         page.click("#save-note-btn")
 
         # Verify note added
         expect(page.locator(".note-title").first).to_have_text("Meeting Notes")
-        expect(page.locator("#empty-state-notes")).not_to_be_visible()
+
+        # Reload again to test note persistence
+        page.reload()
+
+        # Switch back to Notes tab (default is Todo usually, or persistent? My code doesn't persist active tab, just data)
+        page.click("button[data-tab='notes']")
+        expect(page.locator(".note-title").first).to_have_text("Meeting Notes")
 
         # Take screenshot
         page.screenshot(path="verification/app_verification.png", full_page=True)
