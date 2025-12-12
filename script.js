@@ -158,27 +158,43 @@ function renderResults(results) {
 
     card.innerHTML = `
       <div class="card-img-wrapper">
-        <img src="${thumbnail}" alt="${title}" loading="lazy">
+        <img loading="lazy">
       </div>
-      <div class="card-title">${title}</div>
-      <div class="card-duration">${duration}</div>
+      <div class="card-title"></div>
+      <div class="card-duration"></div>
       <div class="card-actions">
-        <button class="card-btn btn-play" aria-label="Play ${title}">Play</button>
-        <button class="card-btn btn-download" aria-label="Download ${title}">Download</button>
+        <button class="card-btn btn-play">Play</button>
+        <button class="card-btn btn-download">Download</button>
       </div>
     `;
 
-    // Event Listeners for buttons
+    // Safely set text content
+    const img = card.querySelector('img');
+    img.src = thumbnail;
+    img.alt = title;
+
+    card.querySelector('.card-title').textContent = title;
+    card.querySelector('.card-duration').textContent = duration;
+
     const playBtn = card.querySelector('.btn-play');
+    playBtn.setAttribute('aria-label', `Play ${title}`);
+
+    const downloadBtn = card.querySelector('.btn-download');
+    downloadBtn.setAttribute('aria-label', `Download ${title}`);
+
+    // Event Listeners for buttons
     playBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       addToPlaylistAndPlay(track);
     });
 
-    const downloadBtn = card.querySelector('.btn-download');
-    downloadBtn.addEventListener('click', (e) => {
+    downloadBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      initiateDownload(track);
+      downloadBtn.disabled = true;
+      downloadBtn.textContent = '...';
+      await initiateDownload(track);
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = 'Download';
     });
 
     elements.resultsContainer.appendChild(card);
