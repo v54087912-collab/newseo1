@@ -266,11 +266,15 @@ async function fetchStreamUrl(videoId) {
     const res = await fetch(apiUrl);
     const data = await res.json();
 
-    // If the API returns { link: "...", ... } or { url: "..." }
+    // Check for socialdown API structure: { data: [ { downloadUrl: "..." } ] }
+    if (data.data && Array.isArray(data.data) && data.data.length > 0 && data.data[0].downloadUrl) {
+      return data.data[0].downloadUrl;
+    }
+
+    // Fallbacks for other potential structures
     if (data.url) return data.url;
     if (data.link) return data.link;
-    // Fallback if the API returns just the file (handled in proxy)?
-    // If proxy returned JSON, we are good.
+    if (data.downloadUrl) return data.downloadUrl;
 
     return null;
   } catch (e) {
