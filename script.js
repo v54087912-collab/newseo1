@@ -1,523 +1,398 @@
-// State Management
-const state = {
-  playlist: [],
-  currentIndex: -1,
-  isPlaying: false,
-  isLoading: false,
-  isExpanded: false,
-  searchResults: [],
-  searchCache: new Map(), // Cache for search results
-  volume: 1
-};
+document.addEventListener('DOMContentLoaded', () => {
+    // --- State Management ---
+    const STATE_KEY_TODOS = 'glassytasks_todos';
+    const STATE_KEY_NOTES = 'glassytasks_notes';
 
-// DOM Elements
-const elements = {
-  searchInput: document.getElementById('searchInput'),
-  searchSpinner: document.getElementById('searchSpinner'),
-  resultsContainer: document.getElementById('resultsContainer'),
-  audioPlayer: document.getElementById('audioPlayer'),
-  miniPlayer: document.getElementById('miniPlayer'),
-  fullPlayer: document.getElementById('fullPlayer'),
-  
-  // Mini Player
-  miniThumbnail: document.getElementById('miniThumbnail'),
-  miniTitle: document.getElementById('miniTitle'),
-  miniPlayBtn: document.getElementById('miniPlayBtn'),
-  miniProgress: document.getElementById('miniProgress'),
-  
-  // Full Player
-  fullThumbnail: document.getElementById('fullThumbnail'),
-  fullTitle: document.getElementById('fullTitle'),
-  progressBar: document.getElementById('progressBar'),
-  currentTime: document.getElementById('currentTime'),
-  totalDuration: document.getElementById('totalDuration'),
-  playBtn: document.getElementById('playBtn'),
-  prevBtn: document.getElementById('prevBtn'),
-  nextBtn: document.getElementById('nextBtn'),
-  volumeSlider: document.getElementById('volumeSlider'),
-  downloadBtn: document.getElementById('downloadBtn'),
-  collapseBtn: document.getElementById('collapseBtn'),
-  
-  toast: document.getElementById('toast')
-};
+    let todos = JSON.parse(localStorage.getItem(STATE_KEY_TODOS)) || [];
+    let notes = JSON.parse(localStorage.getItem(STATE_KEY_NOTES)) || [];
+    let currentFilter = 'all';
 
-// --- Initialization ---
+    // --- DOM Elements ---
+    // Tabs
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
 
-function init() {
-  setupEventListeners();
-  loadStateFromStorage();
-  updateUI();
-}
+    // To-Do Section
+    const todoInput = document.getElementById('todo-input');
+    const prioritySelect = document.getElementById('priority-select');
+    const addTodoBtn = document.getElementById('add-todo-btn');
+    const todoList = document.getElementById('todo-list');
+    const filterBtns = document.querySelectorAll('.filter-btn');
+    const emptyStateTodo = document.getElementById('empty-state-todo');
 
-function setupEventListeners() {
-  // Search
-  elements.searchInput.addEventListener('input', debounce(handleSearch, 300));
+    // Edit Task Modal
+    const editTaskModal = document.getElementById('edit-task-modal');
+    const closeEditTaskBtn = document.querySelector('.close-modal-task');
+    const editTaskInput = document.getElementById('edit-task-input');
+    const editPrioritySelect = document.getElementById('edit-priority-select');
+    const saveEditTaskBtn = document.getElementById('save-edit-task-btn');
+    const cancelEditTaskBtn = document.getElementById('cancel-edit-task-btn');
+    let currentEditTaskId = null;
 
-  // Audio Events
-  elements.audioPlayer.addEventListener('timeupdate', updateProgress);
-  elements.audioPlayer.addEventListener('ended', handleTrackEnd);
-  elements.audioPlayer.addEventListener('loadedmetadata', updateDuration);
-  elements.audioPlayer.addEventListener('play', () => updatePlayState(true));
-  elements.audioPlayer.addEventListener('pause', () => updatePlayState(false));
-  elements.audioPlayer.addEventListener('error', handleAudioError);
+    // Notes Section
+    const notesGrid = document.getElementById('notes-grid');
+    const addNoteBtn = document.getElementById('add-note-btn');
+    const emptyStateNotes = document.getElementById('empty-state-notes');
 
-  // Player Controls
-  elements.miniPlayBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    togglePlay();
-  });
-  elements.playBtn.addEventListener('click', togglePlay);
-  elements.prevBtn.addEventListener('click', playPrevious);
-  elements.nextBtn.addEventListener('click', playNext);
-  
-  elements.progressBar.addEventListener('input', handleSeek);
-  elements.volumeSlider.addEventListener('input', handleVolume);
-  
-  // UI Interactions
-  elements.miniPlayer.addEventListener('click', expandPlayer);
-  elements.collapseBtn.addEventListener('click', collapsePlayer);
-  elements.downloadBtn.addEventListener('click', handleDownload);
-  
-  // Keyboard Shortcuts
-  document.addEventListener('keydown', handleKeyboard);
-}
+    // Note Modal
+    const noteModal = document.getElementById('note-modal');
+    const closeNoteBtn = document.querySelector('.close-modal');
+    const noteTitleInput = document.getElementById('note-title-input');
+    const noteBodyInput = document.getElementById('note-body-input');
+    const saveNoteBtn = document.getElementById('save-note-btn');
+    const cancelNoteBtn = document.getElementById('cancel-note-btn');
+    const modalTitle = document.getElementById('modal-title');
+    let currentEditingNoteId = null;
 
-// --- Search Logic ---
+    // --- Initialization ---
+    renderTodos();
+    renderNotes();
 
-async function handleSearch(e) {
-  const query = e.target.value.trim();
-  if (!query) {
-    elements.resultsContainer.innerHTML = '<div class="placeholder-message">Type to search for music...</div>';
-    return;
-  }
+    // --- Tab Logic ---
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabBtns.forEach(b => b.classList.remove('active'));
+            tabContents.forEach(c => c.classList.remove('active'));
 
-  // Check cache
-  if (state.searchCache.has(query)) {
-    renderResults(state.searchCache.get(query));
-    return;
-  }
-
-  // Handle stale requests by storing the current query timestamp/ID
-  const requestId = Date.now();
-  state.lastRequestId = requestId;
-
-  setLoading(true);
-  try {
-    // API Call via Proxy
-    const url = `/api/proxy?type=search&q=${encodeURIComponent(query)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Search failed');
-    const data = await res.json();
-
-    // Check if this request is still relevant
-    if (state.lastRequestId !== requestId) return;
-    
-    // Normalize data (API structure might vary, adapting to "search results" usually results array)
-    // Based on prompt: "Each result must display: thumbnail, title, duration."
-    // Let's assume the API returns an array or an object with a list.
-    // Inspecting prompt example: `return data.results || data;`
-    
-    const results = Array.isArray(data) ? data : (data.results || []);
-    
-    // Cache and render
-    state.searchCache.set(query, results);
-    renderResults(results);
-    
-  } catch (error) {
-    // Check if this request is still relevant
-    if (state.lastRequestId !== requestId) return;
-
-    console.error(error);
-    showToast('Failed to fetch search results');
-    elements.resultsContainer.innerHTML = '<div class="placeholder-message">Error loading results.</div>';
-  } finally {
-    if (state.lastRequestId === requestId) {
-      setLoading(false);
-    }
-  }
-}
-
-function renderResults(results) {
-  elements.resultsContainer.innerHTML = '';
-  
-  if (results.length === 0) {
-    elements.resultsContainer.innerHTML = '<div class="placeholder-message">No results found.</div>';
-    return;
-  }
-
-  results.forEach(track => {
-    // Expected track structure: { title, duration, thumbnail, videoId, ... }
-    // Note: API might return slightly different keys.
-    const card = document.createElement('div');
-    card.className = 'result-card';
-    
-    const thumbnail = track.thumbnail || 'https://placehold.co/150x150?text=Music';
-    const title = track.title || 'Unknown Title';
-    const duration = track.duration || '0:00'; // timestamp or seconds?
-    // prompt says "duration". Assuming formatted string or needs formatting.
-    
-    card.innerHTML = `
-      <div class="card-img-wrapper">
-        <img loading="lazy">
-      </div>
-      <div class="card-title"></div>
-      <div class="card-duration"></div>
-      <div class="card-actions">
-        <button class="card-btn btn-play">Play</button>
-        <button class="card-btn btn-download">Download</button>
-      </div>
-    `;
-
-    // Safely set text content
-    const img = card.querySelector('img');
-    img.src = thumbnail;
-    img.alt = title;
-
-    card.querySelector('.card-title').textContent = title;
-    card.querySelector('.card-duration').textContent = duration;
-    
-    const playBtn = card.querySelector('.btn-play');
-    playBtn.setAttribute('aria-label', `Play ${title}`);
-    
-    const downloadBtn = card.querySelector('.btn-download');
-    downloadBtn.setAttribute('aria-label', `Download ${title}`);
-
-    // Event Listeners for buttons
-    playBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      addToPlaylistAndPlay(track);
+            btn.classList.add('active');
+            const tabId = btn.getAttribute('data-tab');
+            document.getElementById(`${tabId}-section`).classList.add('active');
+        });
     });
 
-    downloadBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      downloadBtn.disabled = true;
-      downloadBtn.textContent = '...';
-      await initiateDownload(track);
-      downloadBtn.disabled = false;
-      downloadBtn.textContent = 'Download';
+    // --- To-Do Logic ---
+
+    function saveTodos() {
+        localStorage.setItem(STATE_KEY_TODOS, JSON.stringify(todos));
+        renderTodos();
+    }
+
+    function renderTodos() {
+        todoList.innerHTML = '';
+
+        const filteredTodos = todos.filter(todo => {
+            if (currentFilter === 'active') return !todo.completed;
+            if (currentFilter === 'completed') return todo.completed;
+            return true;
+        });
+
+        if (filteredTodos.length === 0) {
+            emptyStateTodo.classList.remove('hidden');
+        } else {
+            emptyStateTodo.classList.add('hidden');
+        }
+
+        // Sort: Non-completed first, then by priority (High > Med > Low) could be a nice enhancement,
+        // but let's stick to user order for now, or just completed at bottom.
+        // Let's sort completed to bottom
+        filteredTodos.sort((a, b) => a.completed - b.completed);
+
+        filteredTodos.forEach(todo => {
+            const li = document.createElement('li');
+            li.className = `task-item ${todo.completed ? 'completed' : ''}`;
+
+            li.innerHTML = `
+                <input type="checkbox" class="task-checkbox" ${todo.completed ? 'checked' : ''}>
+                <div class="task-content">
+                    <span class="task-text">${escapeHtml(todo.text)}</span>
+                    <div class="task-meta">
+                        <span class="priority-dot priority-${todo.priority}"></span>
+                        <span style="opacity:0.7; font-size: 0.7rem; text-transform: uppercase;">${todo.priority}</span>
+                    </div>
+                </div>
+                <div class="task-actions">
+                    <button class="icon-btn edit" title="Edit"><i class="fas fa-edit"></i></button>
+                    <button class="icon-btn delete" title="Delete"><i class="fas fa-trash"></i></button>
+                </div>
+            `;
+
+            // Event Listeners for Item
+            const checkbox = li.querySelector('.task-checkbox');
+            checkbox.addEventListener('change', () => toggleTodo(todo.id));
+
+            const deleteBtn = li.querySelector('.delete');
+            deleteBtn.addEventListener('click', () => deleteTodo(todo.id));
+
+            const editBtn = li.querySelector('.edit');
+            editBtn.addEventListener('click', () => openEditTaskModal(todo));
+
+            todoList.appendChild(li);
+        });
+    }
+
+    function addTodo() {
+        const text = todoInput.value.trim();
+        const priority = prioritySelect.value;
+
+        if (!text) return;
+
+        const newTodo = {
+            id: Date.now(),
+            text: text,
+            priority: priority,
+            completed: false,
+            createdAt: new Date().toISOString()
+        };
+
+        todos.unshift(newTodo); // Add to top
+        saveTodos();
+
+        todoInput.value = '';
+        // Reset priority if desired, or keep last selected
+        // prioritySelect.value = 'medium';
+    }
+
+    function deleteTodo(id) {
+        if(confirm('Are you sure you want to delete this task?')) {
+            todos = todos.filter(t => t.id !== id);
+            saveTodos();
+        }
+    }
+
+    function toggleTodo(id) {
+        todos = todos.map(t => {
+            if (t.id === id) {
+                return { ...t, completed: !t.completed };
+            }
+            return t;
+        });
+
+        // Add a small delay for animation before re-rendering/sorting
+        // But for simplicity in vanilla JS without complex framework reconciliation,
+        // immediate render is safer to keep state in sync.
+        // We handle the visual transition via CSS classes in render.
+        saveTodos();
+
+        // Confetti effect could go here
+        if(todos.find(t => t.id === id).completed) {
+            triggerConfetti();
+        }
+    }
+
+    // Filter Logic
+    filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFilter = btn.getAttribute('data-filter');
+            renderTodos();
+        });
     });
 
-    elements.resultsContainer.appendChild(card);
-  });
-}
+    addTodoBtn.addEventListener('click', addTodo);
+    todoInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addTodo();
+    });
 
-// --- Player Logic ---
-
-function addToPlaylistAndPlay(track) {
-  // Check if track is already in playlist
-  const existingIndex = state.playlist.findIndex(t => t.videoId === track.videoId);
-  
-  if (existingIndex !== -1) {
-    state.currentIndex = existingIndex;
-  } else {
-    // Add to playlist
-    state.playlist.push(track);
-    state.currentIndex = state.playlist.length - 1;
-  }
-  
-  loadTrack(state.currentIndex);
-  expandPlayer();
-}
-
-function loadTrack(index) {
-  if (index < 0 || index >= state.playlist.length) return;
-  
-  const track = state.playlist[index];
-  state.currentIndex = index;
-  
-  // Update UI
-  updatePlayerUI(track);
-  
-  // Build Stream URL
-  // Since we don't have a direct stream URL from search, we rely on the download API which likely gives an MP3.
-  // Or maybe we need to fetch the stream URL.
-  // Prompt says: "When user clicks Play... opens the built-in player."
-  // "Download uses the Download API... When user clicks Download, begin download..."
-  // It doesn't explicitly say how to stream. But usually music apps stream from the same source.
-  // If the download API returns an MP3 link, we can use that for <audio src="...">.
-  
-  // Strategy: Get the MP3 link via Proxy for playback as well.
-  
-  fetchStreamUrl(track.videoId).then(url => {
-    if (url) {
-      elements.audioPlayer.src = url;
-      elements.audioPlayer.play().catch(e => {
-        console.error("Autoplay failed", e);
-        showToast("Tap play to start");
-      });
-    } else {
-      showToast("Could not load stream");
-    }
-  });
-
-  saveStateToStorage();
-}
-
-async function fetchStreamUrl(videoId) {
-  // Use the proxy/download API to get a playable link
-  // NOTE: Ideally we want a stream, but a direct MP3 link works for <audio>
-  
-  // Reuse the buildDownloadUrl logic but maybe we need to resolve it if it's a redirect?
-  // If the Proxy returns JSON with URL:
-  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const apiUrl = `/api/proxy?type=download&url=${encodeURIComponent(ytUrl)}`;
-  
-  try {
-    const res = await fetch(apiUrl);
-    const data = await res.json();
-    
-    // Check for socialdown API structure: { data: [ { downloadUrl: "..." } ] }
-    if (data.data && Array.isArray(data.data) && data.data.length > 0 && data.data[0].downloadUrl) {
-      return data.data[0].downloadUrl;
+    // Edit Task Logic
+    function openEditTaskModal(todo) {
+        currentEditTaskId = todo.id;
+        editTaskInput.value = todo.text;
+        editPrioritySelect.value = todo.priority;
+        editTaskModal.classList.remove('hidden');
     }
 
-    // Fallbacks for other potential structures
-    if (data.url) return data.url;
-    if (data.link) return data.link;
-    if (data.downloadUrl) return data.downloadUrl;
-    
-    return null;
-  } catch (e) {
-    console.error("Stream fetch error", e);
-    return null;
-  }
-}
-
-function togglePlay() {
-  if (state.playlist.length === 0) return;
-  
-  if (state.isPlaying) {
-    elements.audioPlayer.pause();
-  } else {
-    elements.audioPlayer.play();
-  }
-}
-
-function playNext() {
-  if (state.playlist.length === 0) return;
-  
-  let nextIndex = state.currentIndex + 1;
-  if (nextIndex >= state.playlist.length) {
-    nextIndex = 0; // Loop or stop? "Auto-next plays next track when one ends."
-    // Usually looping playlist is fine or stop at end. Let's loop.
-  }
-  loadTrack(nextIndex);
-}
-
-function playPrevious() {
-  if (state.playlist.length === 0) return;
-  
-  // If we are > 3 seconds in, restart track
-  if (elements.audioPlayer.currentTime > 3) {
-    elements.audioPlayer.currentTime = 0;
-    return;
-  }
-  
-  let prevIndex = state.currentIndex - 1;
-  if (prevIndex < 0) {
-    prevIndex = state.playlist.length - 1;
-  }
-  loadTrack(prevIndex);
-}
-
-function handleTrackEnd() {
-  playNext();
-}
-
-function updatePlayState(isPlaying) {
-  state.isPlaying = isPlaying;
-  
-  const icon = isPlaying ? '⏸' : '▶';
-  elements.playBtn.textContent = icon;
-  elements.miniPlayBtn.textContent = icon;
-  
-  // Enable buttons
-  elements.playBtn.disabled = false;
-  elements.miniPlayBtn.disabled = false;
-  elements.prevBtn.disabled = false;
-  elements.nextBtn.disabled = false;
-  elements.downloadBtn.disabled = false;
-}
-
-function updatePlayerUI(track) {
-  const { title, thumbnail, duration } = track;
-  
-  elements.miniTitle.textContent = title;
-  elements.miniThumbnail.src = thumbnail;
-  
-  elements.fullTitle.textContent = title;
-  elements.fullThumbnail.src = thumbnail;
-  
-  // Reset progress
-  elements.progressBar.value = 0;
-  elements.miniProgress.style.width = '0%';
-  elements.currentTime.textContent = "0:00";
-  elements.totalDuration.textContent = duration || "0:00";
-}
-
-function updateProgress() {
-  const { currentTime, duration } = elements.audioPlayer;
-  if (isNaN(duration)) return;
-  
-  const percent = (currentTime / duration) * 100;
-  
-  elements.progressBar.value = percent;
-  elements.miniProgress.style.width = `${percent}%`;
-  
-  elements.currentTime.textContent = formatTime(currentTime);
-  elements.totalDuration.textContent = formatTime(duration);
-  
-  // Update css variable for slider track coloring
-  elements.progressBar.style.setProperty('--value', `${percent}%`);
-}
-
-function handleSeek(e) {
-  const percent = e.target.value;
-  const duration = elements.audioPlayer.duration;
-  if (isNaN(duration)) return;
-  
-  elements.audioPlayer.currentTime = (percent / 100) * duration;
-}
-
-function handleVolume(e) {
-  state.volume = e.target.value;
-  elements.audioPlayer.volume = state.volume;
-}
-
-function updateDuration() {
-  elements.totalDuration.textContent = formatTime(elements.audioPlayer.duration);
-}
-
-function handleAudioError(e) {
-  console.error("Audio error", e);
-  showToast("Error playing track");
-  updatePlayState(false);
-}
-
-// --- Download Logic ---
-
-async function initiateDownload(track) {
-  showToast("Preparing download...");
-  const url = await fetchStreamUrl(track.videoId);
-  if (url) {
-    // Create a temporary link to download
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${track.title}.mp3`; // This might not work for cross-origin without proper headers
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    showToast("Download started");
-  } else {
-    showToast("Download failed");
-  }
-}
-
-function handleDownload() {
-  if (state.currentIndex === -1) return;
-  const track = state.playlist[state.currentIndex];
-  initiateDownload(track);
-}
-
-// --- UI Utilities ---
-
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
-function formatTime(seconds) {
-  if (isNaN(seconds)) return "0:00";
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-function setLoading(isLoading) {
-  state.isLoading = isLoading;
-  if (isLoading) {
-    elements.searchSpinner.classList.add('visible');
-  } else {
-    elements.searchSpinner.classList.remove('visible');
-  }
-}
-
-function showToast(message) {
-  elements.toast.textContent = message;
-  elements.toast.classList.remove('hidden');
-  setTimeout(() => {
-    elements.toast.classList.add('hidden');
-  }, 3000);
-}
-
-function expandPlayer() {
-  state.isExpanded = true;
-  elements.fullPlayer.classList.remove('hidden');
-  document.body.style.overflow = 'hidden'; // Prevent background scrolling
-}
-
-function collapsePlayer() {
-  state.isExpanded = false;
-  elements.fullPlayer.classList.add('hidden');
-  document.body.style.overflow = '';
-}
-
-function handleKeyboard(e) {
-  if (e.target.tagName === 'INPUT') return; // Ignore if typing
-  
-  switch(e.code) {
-    case 'Space':
-      e.preventDefault();
-      togglePlay();
-      break;
-    case 'ArrowRight':
-      elements.audioPlayer.currentTime += 5;
-      break;
-    case 'ArrowLeft':
-      elements.audioPlayer.currentTime -= 5;
-      break;
-  }
-}
-
-// --- Persistence ---
-
-function saveStateToStorage() {
-  localStorage.setItem('musicApp_playlist', JSON.stringify(state.playlist));
-  localStorage.setItem('musicApp_index', state.currentIndex);
-  localStorage.setItem('musicApp_volume', state.volume);
-}
-
-function loadStateFromStorage() {
-  const savedPlaylist = localStorage.getItem('musicApp_playlist');
-  const savedIndex = localStorage.getItem('musicApp_index');
-  const savedVolume = localStorage.getItem('musicApp_volume');
-  
-  if (savedPlaylist) {
-    state.playlist = JSON.parse(savedPlaylist);
-  }
-  
-  if (savedIndex !== null) {
-    const idx = parseInt(savedIndex);
-    if (idx >= 0 && idx < state.playlist.length) {
-      state.currentIndex = idx;
-      updatePlayerUI(state.playlist[idx]);
+    function closeEditTaskModalFunc() {
+        editTaskModal.classList.add('hidden');
+        currentEditTaskId = null;
     }
-  }
-  
-  if (savedVolume !== null) {
-    state.volume = parseFloat(savedVolume);
-    elements.volumeSlider.value = state.volume;
-    elements.audioPlayer.volume = state.volume;
-  }
-}
 
-// Start app
-init();
+    function saveEditedTask() {
+        if (!currentEditTaskId) return;
+        const newText = editTaskInput.value.trim();
+        const newPriority = editPrioritySelect.value;
+
+        if (!newText) {
+            alert("Task cannot be empty");
+            return;
+        }
+
+        todos = todos.map(t => {
+            if (t.id === currentEditTaskId) {
+                return { ...t, text: newText, priority: newPriority };
+            }
+            return t;
+        });
+
+        saveTodos();
+        closeEditTaskModalFunc();
+    }
+
+    closeEditTaskBtn.addEventListener('click', closeEditTaskModalFunc);
+    cancelEditTaskBtn.addEventListener('click', closeEditTaskModalFunc);
+    saveEditTaskBtn.addEventListener('click', saveEditedTask);
+
+
+    // --- Notes Logic ---
+
+    function saveNotes() {
+        localStorage.setItem(STATE_KEY_NOTES, JSON.stringify(notes));
+        renderNotes();
+    }
+
+    function renderNotes() {
+        notesGrid.innerHTML = '';
+
+        if (notes.length === 0) {
+            emptyStateNotes.classList.remove('hidden');
+        } else {
+            emptyStateNotes.classList.add('hidden');
+        }
+
+        notes.forEach(note => {
+            const div = document.createElement('div');
+            div.className = 'note-card';
+
+            const date = new Date(note.updatedAt).toLocaleDateString(undefined, {
+                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            });
+
+            div.innerHTML = `
+                <button class="note-delete-btn" title="Delete Note"><i class="fas fa-times"></i></button>
+                <div style="flex-grow:1; overflow:hidden;">
+                    <h3 class="note-title">${escapeHtml(note.title)}</h3>
+                    <p class="note-body">${escapeHtml(note.body)}</p>
+                </div>
+                <div class="note-date">Edited: ${date}</div>
+            `;
+
+            // Delete Note
+            const deleteBtn = div.querySelector('.note-delete-btn');
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent opening modal
+                deleteNote(note.id);
+            });
+
+            // Edit Note (Open Modal)
+            div.addEventListener('click', () => {
+                openNoteModal(note);
+            });
+
+            notesGrid.appendChild(div);
+        });
+    }
+
+    function deleteNote(id) {
+        if(confirm('Delete this note?')) {
+            notes = notes.filter(n => n.id !== id);
+            saveNotes();
+        }
+    }
+
+    function openNoteModal(note = null) {
+        if (note) {
+            // Edit Mode
+            currentEditingNoteId = note.id;
+            modalTitle.textContent = 'Edit Note';
+            noteTitleInput.value = note.title;
+            noteBodyInput.value = note.body;
+        } else {
+            // Create Mode
+            currentEditingNoteId = null;
+            modalTitle.textContent = 'Create Note';
+            noteTitleInput.value = '';
+            noteBodyInput.value = '';
+        }
+        noteModal.classList.remove('hidden');
+    }
+
+    function closeNoteModalFunc() {
+        noteModal.classList.add('hidden');
+        currentEditingNoteId = null;
+    }
+
+    function saveNote() {
+        const title = noteTitleInput.value.trim() || 'Untitled Note';
+        const body = noteBodyInput.value.trim();
+
+        if (!body) {
+            alert('Please enter some content for the note.');
+            return;
+        }
+
+        const now = new Date().toISOString();
+
+        if (currentEditingNoteId) {
+            // Update existing
+            notes = notes.map(n => {
+                if (n.id === currentEditingNoteId) {
+                    return { ...n, title, body, updatedAt: now };
+                }
+                return n;
+            });
+        } else {
+            // Create new
+            const newNote = {
+                id: Date.now(),
+                title,
+                body,
+                createdAt: now,
+                updatedAt: now
+            };
+            notes.unshift(newNote);
+        }
+
+        saveNotes();
+        closeNoteModalFunc();
+    }
+
+    addNoteBtn.addEventListener('click', () => openNoteModal());
+    closeNoteBtn.addEventListener('click', closeNoteModalFunc);
+    cancelNoteBtn.addEventListener('click', closeNoteModalFunc);
+    saveNoteBtn.addEventListener('click', saveNote);
+
+    // Close modals on outside click
+    window.addEventListener('click', (e) => {
+        if (e.target === noteModal) closeNoteModalFunc();
+        if (e.target === editTaskModal) closeEditTaskModalFunc();
+    });
+
+    // --- Helpers ---
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function triggerConfetti() {
+        // Simple manual confetti visual using css/dom,
+        // keeping it vanilla without external libs.
+        // We can just create small elements and animate them.
+
+        const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'];
+
+        for(let i=0; i<30; i++) {
+            const confetti = document.createElement('div');
+            confetti.style.position = 'fixed';
+            confetti.style.zIndex = '9999';
+            confetti.style.left = '50%';
+            confetti.style.top = '50%';
+            confetti.style.width = '10px';
+            confetti.style.height = '10px';
+            confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            confetti.style.borderRadius = '50%';
+            confetti.style.pointerEvents = 'none';
+
+            document.body.appendChild(confetti);
+
+            const angle = Math.random() * Math.PI * 2;
+            const velocity = 5 + Math.random() * 5;
+            const tx = Math.cos(angle) * 200;
+            const ty = Math.sin(angle) * 200;
+
+            const animation = confetti.animate([
+                { transform: 'translate(0,0) scale(1)', opacity: 1 },
+                { transform: `translate(${tx}px, ${ty}px) scale(0)`, opacity: 0 }
+            ], {
+                duration: 1000,
+                easing: 'cubic-bezier(0, .9, .57, 1)'
+            });
+
+            animation.onfinish = () => confetti.remove();
+        }
+    }
+});
