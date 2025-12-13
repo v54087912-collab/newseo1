@@ -7,7 +7,9 @@ const state = {
   isExpanded: false,
   searchResults: [],
   searchCache: new Map(), // Cache for search results
-  volume: 1
+  volume: 1,
+  lastRequestId: 0,
+  searchAbortController: null
 };
 
 // DOM Elements
@@ -60,6 +62,7 @@ function setupEventListeners() {
   elements.audioPlayer.addEventListener('play', () => updatePlayState(true));
   elements.audioPlayer.addEventListener('pause', () => updatePlayState(false));
   elements.audioPlayer.addEventListener('error', handleAudioError);
+  elements.audioPlayer.addEventListener('waiting', () => showToast("Buffering..."));
 
   // Player Controls
   elements.miniPlayBtn.addEventListener('click', (e) => {
@@ -97,25 +100,29 @@ async function handleSearch(e) {
     return;
   }
 
+  // Cancel previous pending request
+  if (state.searchAbortController) {
+    state.searchAbortController.abort();
+  }
+  state.searchAbortController = new AbortController();
+  const signal = state.searchAbortController.signal;
+
   // Handle stale requests by storing the current query timestamp/ID
   const requestId = Date.now();
   state.lastRequestId = requestId;
 
   setLoading(true);
   try {
-    // API Call via Proxy
-    const url = `/api/proxy?type=search&q=${encodeURIComponent(query)}`;
-    const res = await fetch(url);
+    // Direct API Call (CORS is enabled on upstream)
+    // Using direct call avoids Vercel serverless timeout
+    const url = `https://ashlynn-repo.vercel.app/search?q=${encodeURIComponent(query)}`;
+
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error('Search failed');
     const data = await res.json();
 
     // Check if this request is still relevant
     if (state.lastRequestId !== requestId) return;
-
-    // Normalize data (API structure might vary, adapting to "search results" usually results array)
-    // Based on prompt: "Each result must display: thumbnail, title, duration."
-    // Let's assume the API returns an array or an object with a list.
-    // Inspecting prompt example: `return data.results || data;`
 
     const results = Array.isArray(data) ? data : (data.results || []);
 
@@ -124,6 +131,8 @@ async function handleSearch(e) {
     renderResults(results);
 
   } catch (error) {
+    if (error.name === 'AbortError') return;
+
     // Check if this request is still relevant
     if (state.lastRequestId !== requestId) return;
 
@@ -147,15 +156,14 @@ function renderResults(results) {
 
   results.forEach(track => {
     // Expected track structure: { title, duration, thumbnail, videoId, ... }
-    // Note: API might return slightly different keys.
     const card = document.createElement('div');
     card.className = 'result-card';
 
     const thumbnail = track.thumbnail || 'https://placehold.co/150x150?text=Music';
     const title = track.title || 'Unknown Title';
-    const duration = track.duration || '0:00'; // timestamp or seconds?
-    // prompt says "duration". Assuming formatted string or needs formatting.
+    const duration = track.duration || '0:00';
 
+    // Use HTML structure without injecting user content directly
     card.innerHTML = `
       <div class="card-img-wrapper">
         <img loading="lazy">
@@ -192,9 +200,14 @@ function renderResults(results) {
       e.stopPropagation();
       downloadBtn.disabled = true;
       downloadBtn.textContent = '...';
-      await initiateDownload(track);
-      downloadBtn.disabled = false;
-      downloadBtn.textContent = 'Download';
+      try {
+        await initiateDownload(track);
+      } catch(err) {
+        console.error(err);
+      } finally {
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = 'Download';
+      }
     });
 
     elements.resultsContainer.appendChild(card);
@@ -228,15 +241,7 @@ function loadTrack(index) {
   // Update UI
   updatePlayerUI(track);
 
-  // Build Stream URL
-  // Since we don't have a direct stream URL from search, we rely on the download API which likely gives an MP3.
-  // Or maybe we need to fetch the stream URL.
-  // Prompt says: "When user clicks Play... opens the built-in player."
-  // "Download uses the Download API... When user clicks Download, begin download..."
-  // It doesn't explicitly say how to stream. But usually music apps stream from the same source.
-  // If the download API returns an MP3 link, we can use that for <audio src="...">.
-
-  // Strategy: Get the MP3 link via Proxy for playback as well.
+  showToast("Loading stream...");
 
   fetchStreamUrl(track.videoId).then(url => {
     if (url) {
@@ -254,16 +259,19 @@ function loadTrack(index) {
 }
 
 async function fetchStreamUrl(videoId) {
-  // Use the proxy/download API to get a playable link
-  // NOTE: Ideally we want a stream, but a direct MP3 link works for <audio>
-
-  // Reuse the buildDownloadUrl logic but maybe we need to resolve it if it's a redirect?
-  // If the Proxy returns JSON with URL:
+  // Direct API Call (CORS is enabled on upstream)
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const apiUrl = `/api/proxy?type=download&url=${encodeURIComponent(ytUrl)}`;
+  const apiUrl = `https://socialdown.itz-ashlynn.workers.dev/yt?url=${encodeURIComponent(ytUrl)}&format=mp3`;
 
   try {
-    const res = await fetch(apiUrl);
+    // Set a timeout for the fetch, as the API can be slow
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+    const res = await fetch(apiUrl, { signal: controller.signal });
+    clearTimeout(id);
+
+    if (!res.ok) throw new Error(`API Error: ${res.status}`);
     const data = await res.json();
 
     // Check for socialdown API structure: { data: [ { downloadUrl: "..." } ] }
@@ -279,6 +287,7 @@ async function fetchStreamUrl(videoId) {
     return null;
   } catch (e) {
     console.error("Stream fetch error", e);
+    showToast("Stream API timeout or error");
     return null;
   }
 }
@@ -298,8 +307,7 @@ function playNext() {
 
   let nextIndex = state.currentIndex + 1;
   if (nextIndex >= state.playlist.length) {
-    nextIndex = 0; // Loop or stop? "Auto-next plays next track when one ends."
-    // Usually looping playlist is fine or stop at end. Let's loop.
+    nextIndex = 0;
   }
   loadTrack(nextIndex);
 }
@@ -390,25 +398,36 @@ function updateDuration() {
 
 function handleAudioError(e) {
   console.error("Audio error", e);
-  showToast("Error playing track");
+  // Don't show toast immediately on load start, only if it fails
+  if (elements.audioPlayer.error) {
+     showToast("Error playing track. Stream may be expired.");
+  }
   updatePlayState(false);
+}
+
+function updateUI() {
+    // Only needed if we want to restore full player state on load
+    if (state.currentIndex !== -1 && state.playlist[state.currentIndex]) {
+        updatePlayerUI(state.playlist[state.currentIndex]);
+    }
 }
 
 // --- Download Logic ---
 
 async function initiateDownload(track) {
-  showToast("Preparing download...");
+  showToast("Getting download link...");
   const url = await fetchStreamUrl(track.videoId);
   if (url) {
-    // Create a temporary link to download
+    // Open in new tab which usually triggers download for MP3
+    // Since it's cross-origin, we can't force 'download' attribute easily.
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${track.title}.mp3`; // This might not work for cross-origin without proper headers
     a.target = '_blank';
+    a.rel = 'noopener noreferrer';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    showToast("Download started");
+    showToast("Download started (check tabs)");
   } else {
     showToast("Download failed");
   }
@@ -417,8 +436,16 @@ async function initiateDownload(track) {
 function handleDownload() {
   if (state.currentIndex === -1) return;
   const track = state.playlist[state.currentIndex];
-  initiateDownload(track);
+  // Disable main download button temporarily
+  elements.downloadBtn.disabled = true;
+  elements.downloadBtn.textContent = "...";
+
+  initiateDownload(track).finally(() => {
+      elements.downloadBtn.disabled = false;
+      elements.downloadBtn.textContent = "Download MP3";
+  });
 }
+
 
 // --- UI Utilities ---
 
@@ -451,8 +478,13 @@ function setLoading(isLoading) {
 }
 
 function showToast(message) {
+  // Clear existing toast timeout if we want to debounce toasts,
+  // but simple replacement is fine.
   elements.toast.textContent = message;
   elements.toast.classList.remove('hidden');
+
+  // Reset animation/timer
+  // (Simplification: just use a new timeout)
   setTimeout(() => {
     elements.toast.classList.add('hidden');
   }, 3000);
@@ -461,7 +493,7 @@ function showToast(message) {
 function expandPlayer() {
   state.isExpanded = true;
   elements.fullPlayer.classList.remove('hidden');
-  document.body.style.overflow = 'hidden'; // Prevent background scrolling
+  document.body.style.overflow = 'hidden';
 }
 
 function collapsePlayer() {
@@ -471,7 +503,7 @@ function collapsePlayer() {
 }
 
 function handleKeyboard(e) {
-  if (e.target.tagName === 'INPUT') return; // Ignore if typing
+  if (e.target.tagName === 'INPUT') return;
 
   switch(e.code) {
     case 'Space':
@@ -484,38 +516,6 @@ function handleKeyboard(e) {
     case 'ArrowLeft':
       elements.audioPlayer.currentTime -= 5;
       break;
-  }
-}
-
-// --- Persistence ---
-
-function saveStateToStorage() {
-  localStorage.setItem('musicApp_playlist', JSON.stringify(state.playlist));
-  localStorage.setItem('musicApp_index', state.currentIndex);
-  localStorage.setItem('musicApp_volume', state.volume);
-}
-
-function loadStateFromStorage() {
-  const savedPlaylist = localStorage.getItem('musicApp_playlist');
-  const savedIndex = localStorage.getItem('musicApp_index');
-  const savedVolume = localStorage.getItem('musicApp_volume');
-
-  if (savedPlaylist) {
-    state.playlist = JSON.parse(savedPlaylist);
-  }
-
-  if (savedIndex !== null) {
-    const idx = parseInt(savedIndex);
-    if (idx >= 0 && idx < state.playlist.length) {
-      state.currentIndex = idx;
-      updatePlayerUI(state.playlist[idx]);
-    }
-  }
-
-  if (savedVolume !== null) {
-    state.volume = parseFloat(savedVolume);
-    elements.volumeSlider.value = state.volume;
-    elements.audioPlayer.volume = state.volume;
   }
 }
 
